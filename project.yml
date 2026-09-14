@@ -21,12 +21,24 @@ targets:
     platform: macOS
     sources:
       - path: Sources/Mirage
-      # Référence de dossier : la hiérarchie du venv est copiée telle quelle,
-      # au lieu d'être aplatie fichier par fichier dans Resources.
+      - path: Sources/Shared
+      # Référence de dossier : la hiérarchie de l'interpréteur est copiée telle
+      # quelle, au lieu d'être aplatie fichier par fichier dans Resources.
       - path: Resources/backend
         type: folder
         buildPhase: resources
         optional: true
+    dependencies:
+      - target: MirageHelper
+        embed: false
+    postBuildScripts:
+      - name: Installe le démon et son plist
+        script: |
+          CONTENTS="$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH"
+          mkdir -p "$CONTENTS/Library/LaunchDaemons"
+          cp "$SRCROOT/Resources/LaunchDaemons/io.pivo.Mirage.Helper.plist" \
+             "$CONTENTS/Library/LaunchDaemons/"
+          cp "$BUILT_PRODUCTS_DIR/MirageHelper" "$CONTENTS/MacOS/MirageHelper"
     info:
       path: Resources/Info.plist
       properties:
@@ -42,3 +54,18 @@ targets:
         com.apple.security.network.client: true
         com.apple.security.cs.allow-jit: true
         com.apple.security.cs.disable-library-validation: true
+
+  MirageHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/MirageHelper
+      - path: Sources/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.pivo.Mirage.Helper
+        SWIFT_VERSION: "6.0"
+        # Le démon est un exécutable simple, pas un bundle : son Info.plist est
+        # incorporé dans le binaire par le linker.
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        INFOPLIST_KEY_CFBundleIdentifier: io.pivo.Mirage.Helper

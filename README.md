@@ -49,16 +49,23 @@ console, pour la même raison de shebang absolu.
 | Backend | `Core/PMD3.swift` | Exécution de pymobiledevice3 |
 | Géo | `Geo/Geo.swift` | Cap, interpolation, import GPX |
 
-## Le problème des privilèges
+## Le démon privilégié
 
-Sur iOS 17 et plus, `lockdown start-tunnel` exige root. La version actuelle
-délègue à `sudo -n`, donc il faut une règle sudoers sans mot de passe :
+Sur iOS 17 et plus, ouvrir le tunnel exige de créer une interface réseau,
+opération réservée à root. L'app ne pouvant pas s'élever seule, elle délègue à
+`MirageHelper`, un démon enregistré via `SMAppService` et lancé par `launchd`.
 
-```
-echo "$USER ALL=(root) NOPASSWD: /chemin/vers/pymobiledevice3" | sudo tee /etc/sudoers.d/mirage
-```
+Ils dialoguent en XPC à travers le service Mach `io.pivo.Mirage.Helper`.
+Le démon vérifie la signature de chaque client avant d'accepter une connexion,
+et contraint l'UDID reçu à un jeu de caractères hexadécimal avant de le passer
+à un processus lancé en root.
 
-À remplacer par un démon `SMAppService` avant toute distribution.
+L'utilisateur approuve une fois, dans Réglages > Général > Ouverture et
+extensions. La désinstallation passe par le même écran.
+
+**Limite connue.** Sans identité Developer ID, l'exigence de code se réduit à
+l'identifiant de bundle, vérification nettement plus faible qu'un contrôle par
+Team ID. Ne pas distribuer largement un build ad hoc pour cette raison.
 
 ## Limites connues
 

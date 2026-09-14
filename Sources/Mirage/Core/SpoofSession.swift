@@ -23,6 +23,8 @@ final class SpoofSession {
 
     private var tunnelProcess: Process?
     private var monitor: Task<Void, Never>?
+    /// Passerelle vers le démon privilégié. Sans lui, pas d'iOS 17 et plus.
+    let helper = HelperClient()
     private var motion: Task<Void, Never>?
     private var lastSent: Date = .distantPast
 
@@ -94,20 +96,16 @@ final class SpoofSession {
         }
 
         tunnel = .starting
-        do {
-            _ = try? await PMD3.run(["mounter", "auto-mount"])
-            let (process, lines) = try PMD3.stream(["lockdown", "start-tunnel"], privileged: true)
-            tunnelProcess = process
+        _ = try? await PMD3.run(["mounter", "auto-mount"])
 
-            for await line in lines {
-                if let endpoint = Self.parseRSD(from: line, current: tunnel.endpoint) {
-                    tunnel = .up(endpoint)
-                }
-                if line.lowercased().contains("permission denied") {
-                    tunnel = .failed("Privilèges root requis")
-                }
-            }
-            if tunnel.endpoint == nil { tunnel = .failed("Tunnel interrompu") }
+        helper.refresh()
+        guard helper.state == .ready else {
+            tunnel = .failed(helper.state.label)
+            return
+        }
+
+        do {
+            tunnel = .up(try await helper.startTunnel(udid: device.id))
         } catch {
             tunnel = .failed(error.localizedDescription)
         }
@@ -132,6 +130,7 @@ final class SpoofSession {
         tunnelProcess?.terminate()
         tunnelProcess = nil
         tunnel = .idle
+        Task { await helper.stopTunnel() }
     }
 
     // MARK: Localisation

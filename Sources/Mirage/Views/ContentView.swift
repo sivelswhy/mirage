@@ -52,6 +52,11 @@ struct ContentView: View {
             .overlay {
                 if session.devices.isEmpty {
                     DeviceGate(namespace: glass)
+                } else if needsHelper {
+                    ZStack {
+                        Rectangle().fill(.black.opacity(0.18)).ignoresSafeArea()
+                        HelperGate(namespace: glass)
+                    }
                 }
             }
             .overlay(alignment: .bottom) {
@@ -67,6 +72,7 @@ struct ContentView: View {
             }
             .animation(.smooth(duration: 0.35), value: session.devices.isEmpty)
         }
+        .task { session.helper.refresh() }
         .fileImporter(
             isPresented: $session.isImporting,
             allowedContentTypes: [.xml, .init(filenameExtension: "gpx") ?? .xml]
@@ -98,6 +104,13 @@ struct SimulatedDot: View {
     }
 }
 
+
+extension ContentView {
+    /// Le démon n'a de sens que pour iOS 17 et plus, qui exige le tunnel.
+    var needsHelper: Bool {
+        session.selected?.needsTunnel == true && session.helper.state != .ready
+    }
+}
 
 /// Épingle d'arrivée, rouge comme dans Plans.
 struct DestinationPin: View {
