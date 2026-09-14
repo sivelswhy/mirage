@@ -60,11 +60,13 @@ struct ContentView: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                VStack(spacing: 14) {
-                    RoutePanel(namespace: glass)
-                    HStack(spacing: 16) {
-                        StatusPill(namespace: glass)
-                        JoystickPad(namespace: glass)
+                GlassEffectContainer(spacing: 24) {
+                    VStack(spacing: 14) {
+                        RoutePanel(namespace: glass)
+                        HStack(spacing: 20) {
+                            StatusPill(namespace: glass)
+                            JoystickPad(namespace: glass)
+                        }
                     }
                 }
                 .padding(.bottom, 24)

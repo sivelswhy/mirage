@@ -9,7 +9,7 @@ struct RoutePanel: View {
     var body: some View {
         @Bindable var session = session
 
-        GlassEffectContainer(spacing: 16) {
+        Group {
             VStack(spacing: 12) {
                 Picker("", selection: $session.mode) {
                     ForEach(TravelMode.allCases) { mode in
@@ -39,7 +39,7 @@ struct RoutePanel: View {
                         Label(session.isPlanning ? "Calcul…" : "Lancer le trajet",
                               systemImage: "play.fill")
                     }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.borderedProminent)
                     .disabled(session.routeDestination == nil || session.isPlanning)
 
                     if session.route != nil {
@@ -48,7 +48,7 @@ struct RoutePanel: View {
                         } label: {
                             Image(systemName: "stop.fill")
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.bordered)
                     }
                 }
             }

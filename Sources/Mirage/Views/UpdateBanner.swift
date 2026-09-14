@@ -19,10 +19,10 @@ struct UpdateBanner: View {
                         Button("Installer") {
                             Task { await updater.download(release) }
                         }
-                        .buttonStyle(.glassProminent)
+                        .buttonStyle(.borderedProminent)
 
                         Button("Ignorer") { updater.skip(release) }
-                            .buttonStyle(.glass)
+                            .buttonStyle(.bordered)
                     }
                 }
 
@@ -50,7 +50,7 @@ struct UpdateBanner: View {
     }
 
     private func banner<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        GlassEffectContainer(spacing: 14) {
+        Group {
             content()
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)

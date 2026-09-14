@@ -7,43 +7,54 @@ struct SearchPanel: View {
     @State private var query = ""
 
     var body: some View {
-        GlassEffectContainer(spacing: 18) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Rechercher un lieu", text: $query)
-                        .textFieldStyle(.plain)
-                        .onSubmit { Task { await geocode() } }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .glassEffect(.regular.interactive(), in: .capsule)
-                .glassEffectID("search", in: namespace)
+        VStack(alignment: .leading, spacing: 10) {
+            // Le champ ne porte PAS de .glassEffect : un matériau de verre ne
+            // peut pas échantillonner un autre matériau de verre, et le panneau
+            // qui l'entoure en est déjà un. Un simple remplissage suffit ici.
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .imageScale(.small)
 
-                if !session.recents.isEmpty {
-                    Text("Récents")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
+                TextField("Rechercher un lieu", text: $query)
+                    .textFieldStyle(.plain)
+                    .onSubmit { Task { await geocode() } }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.6), in: .capsule)
 
+            if !session.recents.isEmpty {
+                Text("Récents")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 6)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(session.recents) { waypoint in
                         Button {
-                            Task { await session.setLocation(waypoint.coordinate, throttled: false) }
+                            Task { await session.setLocation(waypoint.coordinate,
+                                                             throttled: false) }
                         } label: {
                             Text(waypoint.name)
+                                .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                                .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
-                        .padding(.horizontal, 6)
                     }
                 }
             }
-            .padding(14)
-            .frame(width: 260)
-            .glassEffect(.regular, in: .rect(cornerRadius: 22))
-            .glassEffectID("panel", in: namespace)
         }
+        .padding(12)
+        .frame(width: 252)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .glassEffectID("panel", in: namespace)
     }
 
     private func geocode() async {
@@ -51,6 +62,7 @@ struct SearchPanel: View {
         request.naturalLanguageQuery = query
         guard let item = try? await MKLocalSearch(request: request).start().mapItems.first
         else { return }
+
         await session.setLocation(item.placemark.coordinate, throttled: false)
         session.recents.insert(
             Waypoint(coordinate: item.placemark.coordinate, name: item.name ?? query),
@@ -65,7 +77,7 @@ struct ControlCluster: View {
     let namespace: Namespace.ID
 
     var body: some View {
-        GlassEffectContainer(spacing: 14) {
+        Group {
             VStack(spacing: 0) {
                 clusterButton("plus") { zoom(0.5) }
                 Divider().frame(width: 26)

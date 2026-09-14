@@ -11,7 +11,7 @@ struct DeviceGate: View {
                 .fill(.black.opacity(0.18))
                 .ignoresSafeArea()
 
-            GlassEffectContainer(spacing: 20) {
+            Group {
                 VStack(spacing: 16) {
                     Image(systemName: "cable.connector.horizontal")
                         .font(.system(size: 38, weight: .light))
@@ -41,14 +41,14 @@ struct DeviceGate: View {
                         Button("Réessayer") {
                             Task { await session.discoverDevices() }
                         }
-                        .buttonStyle(.glassProminent)
+                        .buttonStyle(.borderedProminent)
 
                         Button("Mode développeur") {
                             NSWorkspace.shared.open(
                                 URL(string: "https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device")!
                             )
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.bordered)
                     }
                     .padding(.top, 4)
                 }

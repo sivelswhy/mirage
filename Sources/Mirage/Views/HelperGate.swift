@@ -7,7 +7,7 @@ struct HelperGate: View {
     let namespace: Namespace.ID
 
     var body: some View {
-        GlassEffectContainer(spacing: 18) {
+        Group {
             VStack(spacing: 14) {
                 Image(systemName: "lock.shield")
                     .font(.system(size: 34, weight: .light))
@@ -26,13 +26,13 @@ struct HelperGate: View {
                     switch session.helper.state {
                     case .needsApproval:
                         Button("Ouvrir les Réglages") { session.helper.openSettings() }
-                            .buttonStyle(.glassProminent)
+                            .buttonStyle(.borderedProminent)
                         Button("Revérifier") { session.helper.refresh() }
-                            .buttonStyle(.glass)
+                            .buttonStyle(.bordered)
 
                     default:
                         Button("Installer le démon") { session.helper.register() }
-                            .buttonStyle(.glassProminent)
+                            .buttonStyle(.borderedProminent)
                     }
                 }
                 .padding(.top, 2)
