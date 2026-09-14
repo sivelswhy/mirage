@@ -68,3 +68,11 @@ git tag v0.4.0 && git push origin v0.4.0
 Les builds sont signés ad hoc, pas notarisés. Gatekeeper les bloque donc au
 premier lancement, ce que `install.sh` contourne en retirant l'attribut de
 quarantaine.
+
+## Licence
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md).
+
+Usage, modification et redistribution libres pour tout usage non commercial,
+y compris les organisations caritatives, éducatives et publiques. Toute
+exploitation commerciale nécessite une licence distincte.
