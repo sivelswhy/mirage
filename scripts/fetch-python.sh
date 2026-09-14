@@ -24,7 +24,7 @@ case "$ARCH" in
   *)      echo "Architecture non gérée : $ARCH" >&2; exit 1 ;;
 esac
 
-echo "Recherche d'une distribution $SUFFIX…"
+echo "Recherche d'une distribution ${SUFFIX}"
 ASSET=$(curl -fsSL "$API" | "$ROOT/scripts/pick-python-asset.py" "$SUFFIX")
 
 echo "Téléchargement : ${ASSET##*/}"
