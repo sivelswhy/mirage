@@ -44,12 +44,37 @@ jobs:
       - name: Installe XcodeGen
         run: brew install xcodegen
 
-      - name: Embarque pymobiledevice3
+      - name: Embarque un interpréteur relocalisable
         run: |
-          python3 -m venv Resources/backend
-          Resources/backend/bin/pip install --quiet --upgrade pip pymobiledevice3
-          # Le venv référence un python absolu : on le rend relocalisable.
-          Resources/backend/bin/python -c "import pymobiledevice3; print('backend ok')"
+          # Un venv encode des chemins absolus vers la machine de build : il ne
+          # survit pas au transport. python-build-standalone, lui, est conçu
+          # pour être déplacé n'importe où.
+          ASSET=$(curl -fsSL \
+            https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest \
+            | python3 -c '
+import json, sys
+assets = json.load(sys.stdin)["assets"]
+for version in ("cpython-3.12", "cpython-3.13", "cpython-3.11"):
+    for a in assets:
+        n = a["name"]
+        if n.startswith(version) and n.endswith("aarch64-apple-darwin-install_only.tar.gz"):
+            print(a["browser_download_url"]); sys.exit(0)
+sys.exit("aucune distribution compatible trouvée")')
+
+          echo "Distribution : $ASSET"
+          curl -fsSL "$ASSET" -o /tmp/python.tar.gz
+          rm -rf Resources/backend python
+          mkdir -p Resources
+          tar -xzf /tmp/python.tar.gz
+          mv python Resources/backend
+
+          Resources/backend/bin/python3 -m pip install --quiet --upgrade pip
+          Resources/backend/bin/python3 -m pip install --quiet pymobiledevice3
+          Resources/backend/bin/python3 -m pymobiledevice3 version
+
+          # Allège le bundle : caches, tests et en-têtes de compilation.
+          find Resources/backend -name '__pycache__' -type d -prune -exec rm -rf {} + || true
+          rm -rf Resources/backend/include Resources/backend/share || true
 
       - name: Génère le projet
         run: xcodegen generate
@@ -71,9 +96,17 @@ jobs:
       - name: Signature ad hoc
         run: |
           APP=build/Build/Products/Release/Mirage.app
-          codesign --force --deep --sign - --options runtime "$APP" || \
-            codesign --force --deep --sign - "$APP"
-          codesign --verify --verbose "$APP"
+          BACKEND="$APP/Contents/Resources/backend"
+
+          # Chaque binaire Mach-O embarqué doit être signé avant le bundle,
+          # sinon la signature du conteneur est rejetée à l'exécution.
+          find "$BACKEND" -type f \( -name '*.dylib' -o -name '*.so' \) \
+            -exec codesign --force --sign - {} + || true
+          find "$BACKEND/bin" -type f -perm -u+x \
+            -exec codesign --force --sign - {} + || true
+
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --verbose=2 "$APP"
 
       - name: Fabrique le DMG
         run: |

@@ -7,7 +7,7 @@ enum PMD3Error: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .binaryMissing:
-            "pymobiledevice3 introuvable dans le bundle."
+            "Backend introuvable : ni interpréteur embarqué, ni installation système."
         case .failed(let code, let err):
             "Échec (code \(code)) : \(err.trimmingCharacters(in: .whitespacesAndNewlines))"
         }
@@ -17,29 +17,43 @@ enum PMD3Error: Error, LocalizedError {
 /// Exécute le backend pymobiledevice3 embarqué dans Contents/Resources/backend.
 enum PMD3 {
 
-    static var executableURL: URL? {
-        if let bundled = Bundle.main.url(
-            forResource: "pymobiledevice3",
-            withExtension: nil,
-            subdirectory: "backend/bin"
-        ) { return bundled }
+    /// Interpréteur relocalisable embarqué dans le bundle.
+    /// On appelle `python3 -m pymobiledevice3` plutôt que le script console,
+    /// car ce dernier encode un shebang absolu qui ne survit pas au transport.
+    private static var embeddedPython: URL? {
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        let candidate = resources.appendingPathComponent("backend/bin/python3")
+        return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
+    }
 
-        for candidate in ["/opt/homebrew/bin/pymobiledevice3", "/usr/local/bin/pymobiledevice3"] {
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return URL(fileURLWithPath: candidate)
-            }
+    /// Repli sur une installation système, utile en développement.
+    private static var systemBinary: URL? {
+        ["/opt/homebrew/bin/pymobiledevice3", "/usr/local/bin/pymobiledevice3"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+            .map { URL(fileURLWithPath: $0) }
+    }
+
+    /// Exécutable et préfixe d'arguments à utiliser pour toute commande.
+    static func invocation(_ arguments: [String]) -> (executable: URL, arguments: [String])? {
+        if let python = embeddedPython {
+            return (python, ["-m", "pymobiledevice3"] + arguments)
+        }
+        if let binary = systemBinary {
+            return (binary, arguments)
         }
         return nil
     }
 
+    static var isAvailable: Bool { invocation([]) != nil }
+
     /// Lance la commande et renvoie stdout une fois le processus terminé.
     @discardableResult
     static func run(_ arguments: [String]) async throws -> String {
-        guard let exe = executableURL else { throw PMD3Error.binaryMissing }
+        guard let call = invocation(arguments) else { throw PMD3Error.binaryMissing }
 
         let process = Process()
-        process.executableURL = exe
-        process.arguments = arguments
+        process.executableURL = call.executable
+        process.arguments = call.arguments
 
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
@@ -62,15 +76,15 @@ enum PMD3 {
 
     /// Lance un processus longue durée et diffuse ses lignes de sortie.
     static func stream(_ arguments: [String], privileged: Bool) throws -> (Process, AsyncStream<String>) {
-        guard let exe = executableURL else { throw PMD3Error.binaryMissing }
+        guard let call = invocation(arguments) else { throw PMD3Error.binaryMissing }
 
         let process = Process()
         if privileged {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-            process.arguments = ["-n", exe.path] + arguments
+            process.arguments = ["-n", call.executable.path] + call.arguments
         } else {
-            process.executableURL = exe
-            process.arguments = arguments
+            process.executableURL = call.executable
+            process.arguments = call.arguments
         }
 
         let pipe = Pipe()

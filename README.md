@@ -25,8 +25,18 @@ non bloquant. Menu Mirage > Rechercher des mises à jour pour forcer le contrôl
 open Mirage.xcodeproj
 ```
 
-Le script génère le projet Xcode via XcodeGen et installe `pymobiledevice3`
-dans `Resources/backend`, embarqué ensuite dans le bundle.
+Le script installe XcodeGen, télécharge un interpréteur Python relocalisable
+(python-build-standalone) dans `Resources/backend`, y installe
+`pymobiledevice3`, puis génère le projet.
+
+Un venv classique ne conviendrait pas : il encode des chemins absolus vers la
+machine qui l'a créé, donc il casse dès que le bundle change d'ordinateur.
+L'app appelle `backend/bin/python3 -m pymobiledevice3` plutôt que le script
+console, pour la même raison de shebang absolu.
+
+**Apple Silicon uniquement.** La distribution embarquée est compilée pour
+`aarch64`. Sur un Mac Intel, l'app se rabat sur une installation Homebrew de
+`pymobiledevice3` si elle existe.
 
 ## Architecture
 
