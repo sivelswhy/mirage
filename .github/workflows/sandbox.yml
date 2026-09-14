@@ -54,8 +54,16 @@ jobs:
         run: |
           mkdir -p shots
 
-          echo "=== réglages d'accessibilité et rendu ==="
-          defaults read com.apple.universalaccess reduceTransparency 2>&1 || echo "non défini"
+          # Les runners GitHub activent la réduction de transparence, ce qui
+          # force macOS à aplatir tous les matériaux, Liquid Glass compris.
+          echo "avant : $(defaults read com.apple.universalaccess reduceTransparency 2>&1)"
+          defaults write com.apple.universalaccess reduceTransparency -bool false
+          defaults -currentHost write com.apple.universalaccess reduceTransparency -bool false
+          sudo defaults write /Library/Preferences/com.apple.universalaccess \
+            reduceTransparency -bool false 2>/dev/null || true
+          killall cfprefsd 2>/dev/null || true
+          sleep 3
+          echo "après : $(defaults read com.apple.universalaccess reduceTransparency 2>&1)"
           defaults read -g AppleReduceDesktopTinting 2>&1 || echo "non défini"
           system_profiler SPDisplaysDataType 2>&1 | head -20
 
