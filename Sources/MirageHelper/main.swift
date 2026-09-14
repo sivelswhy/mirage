@@ -13,48 +13,79 @@ private func embeddedPython() -> URL? {
     return FileManager.default.isExecutableFile(atPath: python.path) ? python : nil
 }
 
+// MARK: - Boîtes verrouillées
+
+/// XPC exige qu'un bloc de réponse soit appelé exactement une fois, or
+/// plusieurs chemins peuvent y prétendre : ce garde-fou les départage.
+private final class SingleReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var block: ((String?, Int, String?) -> Void)?
+
+    init(_ block: @escaping (String?, Int, String?) -> Void) { self.block = block }
+
+    func send(_ address: String?, _ port: Int, _ error: String?) {
+        lock.lock()
+        let pending = block
+        block = nil
+        lock.unlock()
+        pending?(address, port, error)
+    }
+}
+
+/// Adresse accumulée entre deux lectures successives du tuyau.
+private final class ParseState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+
+    func set(_ new: String) { lock.lock(); value = new; lock.unlock() }
+    func current() -> String? { lock.lock(); defer { lock.unlock() }; return value }
+}
+
 // MARK: - Service
 
-final class TunnelService: NSObject, TunnelControlProtocol {
+final class TunnelService: NSObject, TunnelControlProtocol, @unchecked Sendable {
 
+    private let queue = NSLock()
     private var process: Process?
     private var address: String?
     private var port: Int = 0
-    private let queue = DispatchQueue(label: "io.pivo.Mirage.Helper.tunnel")
 
     func helperVersion(reply: @escaping (String) -> Void) {
         reply(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0")
     }
 
     func tunnelStatus(reply: @escaping (Bool, String?, Int) -> Void) {
-        queue.sync {
-            reply(process?.isRunning == true, address, port)
-        }
+        queue.lock(); defer { queue.unlock() }
+        reply(process?.isRunning == true, address, port)
     }
 
     func stopTunnel(reply: @escaping (Bool) -> Void) {
-        queue.sync {
-            process?.terminate()
-            process = nil
-            address = nil
-            port = 0
-        }
+        queue.lock()
+        let running = process
+        process = nil
+        address = nil
+        port = 0
+        queue.unlock()
+
+        running?.terminate()
         reply(true)
     }
 
     func startTunnel(udid: String, reply: @escaping (String?, Int, String?) -> Void) {
+        let answer = SingleReply(reply)
+
         // Le paramètre vient d'un client : on le contraint à un UDID plausible
         // plutôt que de le passer tel quel à un processus lancé en root.
         let allowed = CharacterSet(charactersIn: "0123456789abcdefABCDEF-")
         guard !udid.isEmpty, udid.count <= 64,
               udid.unicodeScalars.allSatisfy(allowed.contains)
         else {
-            reply(nil, 0, "Identifiant d'appareil invalide")
+            answer.send(nil, 0, "Identifiant d'appareil invalide")
             return
         }
 
         guard let python = embeddedPython() else {
-            reply(nil, 0, "Interpréteur embarqué introuvable")
+            answer.send(nil, 0, "Interpréteur embarqué introuvable")
             return
         }
 
@@ -68,13 +99,7 @@ final class TunnelService: NSObject, TunnelControlProtocol {
         task.standardOutput = pipe
         task.standardError = pipe
 
-        var pendingAddress: String?
-        var answered = false
-        let answer: (String?, Int, String?) -> Void = { a, p, e in
-            guard !answered else { return }
-            answered = true
-            reply(a, p, e)
-        }
+        let parsed = ParseState()
 
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
@@ -84,35 +109,39 @@ final class TunnelService: NSObject, TunnelControlProtocol {
                 let text = String(line)
 
                 if let value = Self.capture(#"RSD Address:\s*([0-9a-fA-F:.]+)"#, in: text) {
-                    pendingAddress = value
+                    parsed.set(value)
                 }
                 if let value = Self.capture(#"RSD Port:\s*(\d+)"#, in: text),
-                   let number = Int(value), let resolved = pendingAddress {
-                    self?.queue.sync {
-                        self?.address = resolved
-                        self?.port = number
-                    }
-                    answer(resolved, number, nil)
+                   let number = Int(value), let resolved = parsed.current() {
+                    self?.record(address: resolved, port: number)
+                    answer.send(resolved, number, nil)
                 }
             }
         }
 
         task.terminationHandler = { _ in
-            answer(nil, 0, "Le tunnel s'est fermé avant d'annoncer son adresse")
+            answer.send(nil, 0, "Le tunnel s'est fermé avant d'annoncer son adresse")
         }
 
         do {
             try task.run()
-            queue.sync { self.process = task }
+            queue.lock(); process = task; queue.unlock()
         } catch {
-            answer(nil, 0, error.localizedDescription)
+            answer.send(nil, 0, error.localizedDescription)
             return
         }
 
         // Filet de sécurité : sans réponse en trente secondes, on abandonne.
         DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
-            answer(nil, 0, "Délai dépassé à l'ouverture du tunnel")
+            answer.send(nil, 0, "Délai dépassé à l'ouverture du tunnel")
         }
+    }
+
+    private func record(address value: String, port number: Int) {
+        queue.lock()
+        address = value
+        port = number
+        queue.unlock()
     }
 
     private static func capture(_ pattern: String, in text: String) -> String? {
@@ -127,50 +156,18 @@ final class TunnelService: NSObject, TunnelControlProtocol {
 
 // MARK: - Écoute XPC
 
-final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
+final class ListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
 
     private let service = TunnelService()
 
     func listener(_ listener: NSXPCListener,
                   shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-
-        guard Self.isTrusted(connection) else {
-            NSLog("Mirage helper : connexion refusée, client non vérifié")
-            return false
-        }
-
+        // L'exigence de signature est posée sur l'écouteur : macOS écarte les
+        // clients non conformes avant même d'arriver ici.
         connection.exportedInterface = NSXPCInterface(with: TunnelControlProtocol.self)
         connection.exportedObject = service
         connection.resume()
         return true
-    }
-
-    /// Vérifie que le client est bien signé par le même bundle que le démon.
-    ///
-    /// Sans identité Developer ID, cette exigence se limite à l'identifiant de
-    /// bundle, ce qui est nettement plus faible qu'une vérification par Team ID.
-    private static func isTrusted(_ connection: NSXPCConnection) -> Bool {
-        var token = connection.auditToken
-        let attributes = [
-            kSecGuestAttributeAudit: Data(bytes: &token, count: MemoryLayout.size(ofValue: token))
-        ] as CFDictionary
-
-        var code: SecCode?
-        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess,
-              let guest = code
-        else { return false }
-
-        let requirementText = "identifier \"io.pivo.Mirage\"" +
-            " and anchor apple generic" +
-            " or identifier \"io.pivo.Mirage\""
-
-        var requirement: SecRequirement?
-        guard SecRequirementCreateWithString(requirementText as CFString, [], &requirement)
-                == errSecSuccess,
-              let rule = requirement
-        else { return false }
-
-        return SecCodeCheckValidity(guest, [], rule) == errSecSuccess
     }
 }
 
@@ -179,6 +176,13 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
 let delegate = ListenerDelegate()
 let listener = NSXPCListener(machServiceName: kHelperMachServiceName)
 listener.delegate = delegate
+
+// API publique depuis macOS 13. Elle évite de manipuler le jeton d'audit à la
+// main, ce qui passe par une propriété privée de NSXPCConnection.
+// Sans identité Developer ID, l'exigence se limite à l'identifiant de bundle,
+// donc reste plus faible qu'un contrôle par Team ID.
+listener.setConnectionCodeSigningRequirement("identifier \"io.pivo.Mirage\"")
+
 listener.resume()
 
 NSLog("Mirage helper démarré")
