@@ -25,7 +25,30 @@ case "$ARCH" in
 esac
 
 echo "Recherche d'une distribution ${SUFFIX}"
-ASSET=$(curl -fsSL "$API" | "$ROOT/scripts/pick-python-asset.py" "$SUFFIX")
+
+# L'API anonyme est limitée par IP, et les runners partagent les leurs :
+# authentifier quand un jeton est disponible évite les 403 aléatoires.
+AUTH=()
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+fi
+
+METADATA=""
+for attempt in 1 2 3; do
+  if METADATA=$(curl -fsSL "${AUTH[@]}" -H "Accept: application/vnd.github+json" "$API"); then
+    break
+  fi
+  echo "Tentative ${attempt} échouée, nouvel essai."
+  METADATA=""
+  sleep $((attempt * 5))
+done
+
+if [[ -z "$METADATA" ]]; then
+  echo "Impossible d'interroger l'API des distributions Python." >&2
+  exit 1
+fi
+
+ASSET=$(printf '%s' "$METADATA" | "$ROOT/scripts/pick-python-asset.py" "$SUFFIX")
 
 echo "Téléchargement : ${ASSET##*/}"
 STAGE=$(mktemp -d)
