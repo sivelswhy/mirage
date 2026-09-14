@@ -19,8 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sélectionne Xcode 26
-        run: sudo xcode-select -s /Applications/Xcode_26.app
+      - name: Sélectionne le Xcode le plus récent
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [[ -n "$LATEST" ]]; then sudo xcode-select -s "$LATEST"; fi
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i macos || true
 
       - name: Calcule la version
         id: version
