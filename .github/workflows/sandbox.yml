@@ -54,9 +54,14 @@ jobs:
         run: |
           mkdir -p shots
 
+          echo "=== réglages d'accessibilité et rendu ==="
+          defaults read com.apple.universalaccess reduceTransparency 2>&1 || echo "non défini"
+          defaults read -g AppleReduceDesktopTinting 2>&1 || echo "non défini"
+          system_profiler SPDisplaysDataType 2>&1 | head -20
+
           # Le runner possède une session graphique, mais l'app doit être au
           # premier plan et avoir eu le temps de dessiner la carte.
-          open -a /Applications/Mirage.app || true
+          MIRAGE_DIAGNOSTIC=1 open -a /Applications/Mirage.app --env MIRAGE_DIAGNOSTIC=1 || open -a /Applications/Mirage.app || true
           sleep 20
           osascript -e 'tell application "Mirage" to activate' || true
           sleep 10

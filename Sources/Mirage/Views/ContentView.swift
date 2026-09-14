@@ -41,7 +41,11 @@ struct ContentView: View {
             }
             .ignoresSafeArea()
             .overlay(alignment: .top) {
-                UpdateBanner(namespace: glass).padding(.top, 14)
+                VStack(spacing: 8) {
+                    UpdateBanner(namespace: glass)
+                    if MaterialProbe.isEnabled { MaterialProbe() }
+                }
+                .padding(.top, 14)
             }
             .overlay(alignment: .topLeading) {
                 SearchPanel(namespace: glass).padding(20)
