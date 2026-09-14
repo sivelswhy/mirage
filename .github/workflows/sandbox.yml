@@ -1,0 +1,93 @@
+name: sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      tmate:
+        description: "Ouvrir une session SSH interactive après la capture"
+        type: boolean
+        default: false
+
+jobs:
+  screenshot:
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sélectionne le Xcode le plus récent
+        run: |
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [[ -n "$LATEST" ]]; then sudo xcode-select -s "$LATEST"; fi
+          xcodebuild -version
+
+      - name: Installe XcodeGen
+        run: brew install xcodegen
+
+      - name: Embarque un interpréteur relocalisable
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/fetch-python.sh
+
+      - name: Génère et compile
+        run: |
+          xcodegen generate
+          xcodebuild \
+            -project Mirage.xcodeproj \
+            -scheme Mirage \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Installe l'app
+        run: |
+          APP=build/Build/Products/Debug/Mirage.app
+          codesign --force --deep --sign - "$APP"
+          sudo cp -R "$APP" /Applications/
+          xattr -dr com.apple.quarantine /Applications/Mirage.app || true
+
+      - name: Lance et capture
+        run: |
+          mkdir -p shots
+
+          # Le runner possède une session graphique, mais l'app doit être au
+          # premier plan et avoir eu le temps de dessiner la carte.
+          open -a /Applications/Mirage.app || true
+          sleep 20
+          osascript -e 'tell application "Mirage" to activate' || true
+          sleep 10
+
+          echo "=== fenêtres visibles ==="
+          osascript -e 'tell application "System Events" to get name of every process whose visible is true' || true
+
+          # -x supprime le son d'obturateur, -o exclut l'ombre de fenêtre.
+          screencapture -x -o shots/ecran-1.png || echo "capture plein écran refusée"
+          sleep 8
+          screencapture -x -o shots/ecran-2.png || true
+
+          ls -la shots || true
+
+      - name: Journaux de l'app
+        if: always()
+        run: |
+          log show --predicate 'process == "Mirage" OR process == "MirageHelper"' \
+            --last 5m --style compact > shots/journal.txt 2>&1 || true
+          tail -60 shots/journal.txt || true
+
+      - name: Publie les captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: captures
+          path: shots/
+          retention-days: 14
+
+      - name: Session interactive
+        if: ${{ inputs.tmate }}
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
