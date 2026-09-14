@@ -25,22 +25,7 @@ case "$ARCH" in
 esac
 
 echo "Recherche d'une distribution $SUFFIX…"
-ASSET=$(curl -fsSL "$API" | SUFFIX="$SUFFIX" /usr/bin/env python3 - <<'PYTHON'
-import json, os, sys
-
-suffix = os.environ["SUFFIX"]
-assets = json.load(sys.stdin)["assets"]
-
-for series in ("cpython-3.12", "cpython-3.13", "cpython-3.11"):
-    for asset in assets:
-        name = asset["name"]
-        if name.startswith(series) and name.endswith(suffix):
-            print(asset["browser_download_url"])
-            sys.exit(0)
-
-sys.exit("aucune distribution compatible trouvée")
-PYTHON
-)
+ASSET=$(curl -fsSL "$API" | "$ROOT/scripts/pick-python-asset.py" "$SUFFIX")
 
 echo "Téléchargement : ${ASSET##*/}"
 STAGE=$(mktemp -d)
