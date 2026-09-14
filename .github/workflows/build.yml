@@ -14,6 +14,10 @@ concurrency:
 jobs:
   macos:
     runs-on: macos-26
+    # Le jeton du workflow est en lecture seule par défaut : sans cela,
+    # la création de release échoue en 403.
+    permissions:
+      contents: write
     timeout-minutes: 30
 
     steps:
