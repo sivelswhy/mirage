@@ -34,13 +34,20 @@ struct ContentView: View {
             .overlay(alignment: .topTrailing) {
                 ControlCluster(camera: $camera, namespace: glass).padding(20)
             }
+            .overlay {
+                if session.devices.isEmpty {
+                    DeviceGate(namespace: glass)
+                }
+            }
             .overlay(alignment: .bottom) {
                 HStack(spacing: 16) {
                     StatusPill(namespace: glass)
                     JoystickPad(namespace: glass)
                 }
                 .padding(.bottom, 24)
+                .opacity(session.devices.isEmpty ? 0 : 1)
             }
+            .animation(.smooth(duration: 0.35), value: session.devices.isEmpty)
         }
         .fileImporter(
             isPresented: $session.isImporting,

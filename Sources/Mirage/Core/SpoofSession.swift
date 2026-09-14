@@ -16,17 +16,48 @@ final class SpoofSession {
     var lastError: String?
 
     private var tunnelProcess: Process?
+    private var monitor: Task<Void, Never>?
     private var motion: Task<Void, Never>?
     private var lastSent: Date = .distantPast
 
     // MARK: Appareils
 
+    /// Sonde le bus USB en continu pour détecter branchement et débranchement.
+    func startMonitoring() {
+        monitor?.cancel()
+        monitor = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.discoverDevices()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
     func discoverDevices() async {
         do {
             let json = try await PMD3.run(["usbmux", "list"])
-            devices = Self.parseDevices(json)
-            selected = selected ?? devices.first
+            let found = Self.parseDevices(json)
+            let appeared = devices.isEmpty && !found.isEmpty
+            let vanished = !devices.isEmpty && found.isEmpty
+
+            devices = found
+            lastError = nil
+
+            if vanished {
+                stopDriving()
+                stopTunnel()
+                simulated = nil
+                selected = nil
+            }
+            if selected == nil || !found.contains(where: { $0.id == selected?.id }) {
+                selected = found.first
+            }
+            if appeared, let device = selected, device.needsTunnel {
+                Task { await startTunnel() }
+            }
         } catch {
+            devices = []
+            selected = nil
             lastError = error.localizedDescription
         }
     }

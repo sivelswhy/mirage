@@ -9,7 +9,7 @@ struct MirageApp: App {
             ContentView()
                 .environment(session)
                 .frame(minWidth: 900, minHeight: 600)
-                .task { await session.discoverDevices() }
+                .task { session.startMonitoring() }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
