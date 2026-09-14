@@ -17,6 +17,14 @@ struct ContentView: View {
 
         MapReader { proxy in
             Map(position: $camera) {
+                if let route = session.route {
+                    MapPolyline(coordinates: route.polyline)
+                        .stroke(.tint, style: StrokeStyle(lineWidth: 7, lineCap: .round,
+                                                          lineJoin: .round))
+                }
+                if let destination = session.routeDestination {
+                    Annotation("", coordinate: destination) { DestinationPin() }
+                }
                 if let point = session.simulated {
                     Annotation("", coordinate: point) { SimulatedDot() }
                 }
@@ -25,7 +33,11 @@ struct ContentView: View {
             .mapControlVisibility(.hidden)
             .onTapGesture { location in
                 guard let coordinate = proxy.convert(location, from: .local) else { return }
-                Task { await session.setLocation(coordinate, throttled: false) }
+                if NSEvent.modifierFlags.contains(.option) {
+                    session.setDestination(coordinate)
+                } else {
+                    Task { await session.setLocation(coordinate, throttled: false) }
+                }
             }
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
@@ -40,9 +52,12 @@ struct ContentView: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                HStack(spacing: 16) {
-                    StatusPill(namespace: glass)
-                    JoystickPad(namespace: glass)
+                VStack(spacing: 14) {
+                    RoutePanel(namespace: glass)
+                    HStack(spacing: 16) {
+                        StatusPill(namespace: glass)
+                        JoystickPad(namespace: glass)
+                    }
                 }
                 .padding(.bottom, 24)
                 .opacity(session.devices.isEmpty ? 0 : 1)
@@ -77,5 +92,16 @@ struct SimulatedDot: View {
         }
         .animation(.easeInOut(duration: 1.8).repeatForever(), value: pulsing)
         .onAppear { pulsing = true }
+    }
+}
+
+
+/// Épingle d'arrivée, rouge comme dans Plans.
+struct DestinationPin: View {
+    var body: some View {
+        Image(systemName: "mappin.circle.fill")
+            .font(.system(size: 26))
+            .foregroundStyle(.white, .red)
+            .shadow(radius: 2)
     }
 }

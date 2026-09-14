@@ -1,0 +1,222 @@
+import Foundation
+import MapKit
+import CoreLocation
+
+enum TravelMode: String, CaseIterable, Identifiable, Sendable {
+    case driving, transit, cycling, walking
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .driving: "Voiture"
+        case .transit: "Transports"
+        case .cycling: "Vélo"
+        case .walking: "À pied"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .driving: "car.fill"
+        case .transit: "tram.fill"
+        case .cycling: "bicycle"
+        case .walking: "figure.walk"
+        }
+    }
+
+    /// MapKit ne trace ni le vélo ni les transports : on emprunte la géométrie routière.
+    var mapKitType: MKDirectionsTransportType {
+        switch self {
+        case .driving, .transit, .cycling: .automobile
+        case .walking: .walking
+        }
+    }
+
+    /// Vitesse moyenne de repli en m/s quand la durée MapKit ne s'applique pas.
+    var fallbackSpeed: Double {
+        switch self {
+        case .driving: 11.1
+        case .transit: 6.9
+        case .cycling: 5.0
+        case .walking: 1.4
+        }
+    }
+
+    /// Les arrêts marqués : feux pour la voiture, stations pour les transports.
+    var stopProbability: Double {
+        switch self {
+        case .driving: 0.35
+        case .transit: 0.6
+        case .cycling: 0.15
+        case .walking: 0.0
+        }
+    }
+}
+
+struct SimulatedRoute: Sendable {
+    let polyline: [CLLocationCoordinate2D]
+    /// Une trame par seconde, prête à être envoyée telle quelle.
+    let frames: [CLLocationCoordinate2D]
+    let distance: CLLocationDistance
+    let duration: TimeInterval
+    let mode: TravelMode
+
+    var averageSpeedKmh: Double { distance / max(duration, 1) * 3.6 }
+}
+
+enum RouteError: Error, LocalizedError {
+    case noRoute
+
+    var errorDescription: String? { "Aucun itinéraire trouvé entre ces deux points." }
+}
+
+enum RoutePlanner {
+
+    static func route(
+        from origin: CLLocationCoordinate2D,
+        to destination: CLLocationCoordinate2D,
+        mode: TravelMode
+    ) async throws -> SimulatedRoute {
+
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: .init(coordinate: origin))
+        request.destination = MKMapItem(placemark: .init(coordinate: destination))
+        request.transportType = mode.mapKitType
+
+        guard let route = try await MKDirections(request: request).calculate().routes.first
+        else { throw RouteError.noRoute }
+
+        let coordinates = route.polyline.coordinates
+        let duration = try await resolvedDuration(route: route, mode: mode,
+                                                  origin: origin, destination: destination)
+
+        return SimulatedRoute(
+            polyline: coordinates,
+            frames: frames(along: coordinates, duration: duration, mode: mode),
+            distance: route.distance,
+            duration: duration,
+            mode: mode
+        )
+    }
+
+    /// Pour les transports, MapKit donne une durée mais pas de tracé : on récupère
+    /// la durée séparément et on la plaque sur la géométrie routière.
+    private static func resolvedDuration(
+        route: MKRoute,
+        mode: TravelMode,
+        origin: CLLocationCoordinate2D,
+        destination: CLLocationCoordinate2D
+    ) async throws -> TimeInterval {
+
+        switch mode {
+        case .driving, .walking:
+            return route.expectedTravelTime
+
+        case .transit:
+            let request = MKDirections.Request()
+            request.source = MKMapItem(placemark: .init(coordinate: origin))
+            request.destination = MKMapItem(placemark: .init(coordinate: destination))
+            request.transportType = .transit
+            if let eta = try? await MKDirections(request: request).calculateETA() {
+                return eta.expectedTravelTime
+            }
+            return route.distance / mode.fallbackSpeed
+
+        case .cycling:
+            return route.distance / mode.fallbackSpeed
+        }
+    }
+
+    /// Rééchantillonne le tracé à une trame par seconde avec un profil de vitesse réaliste :
+    /// ralentissement dans les virages, arrêts marqués, bruit de conduite.
+    static func frames(
+        along path: [CLLocationCoordinate2D],
+        duration: TimeInterval,
+        mode: TravelMode
+    ) -> [CLLocationCoordinate2D] {
+
+        guard path.count > 1 else { return path }
+
+        var cumulative: [CLLocationDistance] = [0]
+        for pair in zip(path, path.dropFirst()) {
+            let a = CLLocation(latitude: pair.0.latitude, longitude: pair.0.longitude)
+            let b = CLLocation(latitude: pair.1.latitude, longitude: pair.1.longitude)
+            cumulative.append(cumulative.last! + a.distance(from: b))
+        }
+
+        let total = cumulative.last ?? 0
+        guard total > 0 else { return path }
+
+        let steps = max(2, Int(duration.rounded()))
+        let nominal = total / duration
+
+        var output: [CLLocationCoordinate2D] = []
+        var travelled: CLLocationDistance = 0
+        var generator = SystemRandomNumberGenerator()
+
+        for _ in 0..<steps {
+            output.append(interpolate(path: path, cumulative: cumulative, at: travelled))
+
+            let curvature = curvatureFactor(path: path, cumulative: cumulative, at: travelled)
+            let noise = Double.random(in: 0.92...1.08, using: &generator)
+            let stopped = Double.random(in: 0...1, using: &generator) < mode.stopProbability * 0.04
+
+            travelled += stopped ? 0 : nominal * curvature * noise
+            travelled = min(travelled, total)
+        }
+
+        output.append(path[path.count - 1])
+        return output
+    }
+
+    private static func interpolate(
+        path: [CLLocationCoordinate2D],
+        cumulative: [CLLocationDistance],
+        at distance: CLLocationDistance
+    ) -> CLLocationCoordinate2D {
+
+        guard let index = cumulative.firstIndex(where: { $0 >= distance }), index > 0
+        else { return path[0] }
+
+        let span = cumulative[index] - cumulative[index - 1]
+        let t = span > 0 ? (distance - cumulative[index - 1]) / span : 0
+        let a = path[index - 1], b = path[index]
+
+        return CLLocationCoordinate2D(
+            latitude: a.latitude + (b.latitude - a.latitude) * t,
+            longitude: a.longitude + (b.longitude - a.longitude) * t
+        )
+    }
+
+    /// Renvoie un facteur entre 0,45 et 1 selon l'angle du virage à venir.
+    private static func curvatureFactor(
+        path: [CLLocationCoordinate2D],
+        cumulative: [CLLocationDistance],
+        at distance: CLLocationDistance
+    ) -> Double {
+
+        guard let index = cumulative.firstIndex(where: { $0 >= distance }),
+              index > 0, index < path.count - 1
+        else { return 1 }
+
+        let a = path[index - 1], b = path[index], c = path[index + 1]
+        let inbound = atan2(b.longitude - a.longitude, b.latitude - a.latitude)
+        let outbound = atan2(c.longitude - b.longitude, c.latitude - b.latitude)
+
+        var delta = abs(outbound - inbound)
+        if delta > .pi { delta = 2 * .pi - delta }
+
+        return max(0.45, 1 - delta / .pi)
+    }
+}
+
+extension MKPolyline {
+    var coordinates: [CLLocationCoordinate2D] {
+        var buffer = [CLLocationCoordinate2D](
+            repeating: kCLLocationCoordinate2DInvalid, count: pointCount
+        )
+        getCoordinates(&buffer, range: NSRange(location: 0, length: pointCount))
+        return buffer
+    }
+}

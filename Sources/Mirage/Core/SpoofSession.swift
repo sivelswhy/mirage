@@ -13,6 +13,12 @@ final class SpoofSession {
     var speed: Double = 4.2
     var recents: [Waypoint] = []
     var isImporting = false
+    var mode: TravelMode = .driving
+    var route: SimulatedRoute?
+    var routeOrigin: CLLocationCoordinate2D?
+    var routeDestination: CLLocationCoordinate2D?
+    var isPlanning = false
+    var progress: Double = 0
     var lastError: String?
 
     private var tunnelProcess: Process?
@@ -180,14 +186,46 @@ final class SpoofSession {
         motion = nil
     }
 
-    func play(route: [CLLocationCoordinate2D]) {
+    // MARK: Itinéraires
+
+    /// Calcule le trajet puis, si tout va bien, le joue immédiatement.
+    func planRoute() async {
+        guard let from = routeOrigin ?? simulated, let to = routeDestination else { return }
+        isPlanning = true
+        defer { isPlanning = false }
+
+        do {
+            let computed = try await RoutePlanner.route(from: from, to: to, mode: mode)
+            route = computed
+            play(route: computed.frames)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func setDestination(_ coordinate: CLLocationCoordinate2D) {
+        routeOrigin = simulated ?? routeOrigin
+        routeDestination = coordinate
+    }
+
+    func cancelRoute() {
+        stopDriving()
+        route = nil
+        routeDestination = nil
+        progress = 0
+    }
+
+    func play(route frames: [CLLocationCoordinate2D]) {
         motion?.cancel()
+        progress = 0
         motion = Task { [weak self] in
-            for point in route {
+            for (index, point) in frames.enumerated() {
                 guard let self, !Task.isCancelled else { return }
                 await self.setLocation(point, throttled: false)
+                self.progress = Double(index + 1) / Double(frames.count)
                 try? await Task.sleep(for: .seconds(1))
             }
         }
     }
+
 }

@@ -109,6 +109,7 @@ d.line([(670 * S, 116 * S), (694 * S, 116 * S)], fill=(0, 0, 0, 40), width=max(1
 d.text((cx - 9 * S, 124 * S), "3D", font=f(SANSB, 10), fill=(40, 38, 36))
 d.text((cx - 4 * S, 152 * S), "N", font=f(SANSB, 10), fill=(40, 38, 36))
 
+img_bare = img.copy()
 dot = (360 * S, 214 * S)
 for rad, alpha in [(34, 34), (26, 46)]:
     d.ellipse([dot[0] - rad * S, dot[1] - rad * S, dot[0] + rad * S, dot[1] + rad * S],
@@ -117,7 +118,6 @@ d.ellipse([dot[0] - 11 * S, dot[1] - 11 * S, dot[0] + 11 * S, dot[1] + 11 * S],
           fill=(255, 255, 255))
 d.ellipse([dot[0] - 8 * S, dot[1] - 8 * S, dot[0] + 8 * S, dot[1] + 8 * S], fill=TINT)
 
-img_bare = img.copy()
 glass(img, (196, 380, 452, 426), 23, tint=TINT)
 d.ellipse([(214 - 6) * S, (398 - 6) * S, (214 + 6) * S, (398 + 6) * S], fill=TINT)
 d.text((232 * S, 388 * S), "49.18290, -0.37070", font=f(MONO, 11), fill=(28, 26, 24))
@@ -179,4 +179,86 @@ d2.text(((right0 + right1 - d2.textlength(t, font=ft)) / 2, 277 * S), t, font=ft
 out2 = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 out2.paste(img2, (0, 0), corner)
 out2.save("/mnt/user-data/outputs/mirage-v0.2-no-device.png")
+
+# --- État 3 : trajet en cours ---
+img3 = img_bare.copy()
+d3 = ImageDraw.Draw(img3, "RGBA")
+
+route = [(300, 96), (322, 150), (352, 206), (392, 250), (452, 244),
+         (520, 236), (592, 230), (646, 224)]
+rp = [(x * S, y * S) for x, y in route]
+d3.line(rp, fill=(255, 255, 255, 235), width=int(11 * S), joint="curve")
+d3.line(rp, fill=TINT, width=int(7 * S), joint="curve")
+
+px, py = 392 * S, 250 * S
+for rad, alpha in [(30, 34), (22, 46)]:
+    d3.ellipse([px - rad * S, py - rad * S, px + rad * S, py + rad * S],
+               fill=(TINT[0], TINT[1], TINT[2], alpha))
+d3.ellipse([px - 11 * S, py - 11 * S, px + 11 * S, py + 11 * S], fill=(255, 255, 255))
+d3.ellipse([px - 8 * S, py - 8 * S, px + 8 * S, py + 8 * S], fill=TINT)
+
+ex, ey = 646 * S, 224 * S
+d3.ellipse([ex - 12 * S, ey - 12 * S, ex + 12 * S, ey + 12 * S], fill=(235, 62, 54))
+d3.ellipse([ex - 4 * S, ey - 6 * S, ex + 4 * S, ey + 2 * S], fill=(255, 255, 255))
+
+glass(img3, (252, 306, 468, 396), 22)
+mx = 360 * S
+
+seg = [("car", True), ("tram", False), ("bike", False), ("walk", False)]
+sw = 46
+for i, (name, active) in enumerate(seg):
+    x0 = mx - 2 * sw * S + i * sw * S
+    x1 = x0 + sw * S
+    if active:
+        d3.rounded_rectangle([x0 + 2 * S, 316 * S, x1 - 2 * S, 338 * S],
+                             radius=7 * S, fill=(255, 255, 255, 225))
+    cx2 = (x0 + x1) / 2
+    col = (24, 22, 20) if active else (120, 116, 112)
+    if name == "car":
+        d3.rounded_rectangle([cx2 - 10 * S, 322 * S, cx2 + 10 * S, 331 * S],
+                             radius=3 * S, fill=col)
+        d3.rounded_rectangle([cx2 - 6 * S, 318 * S, cx2 + 6 * S, 324 * S],
+                             radius=2 * S, fill=col)
+    elif name == "tram":
+        d3.rounded_rectangle([cx2 - 7 * S, 318 * S, cx2 + 7 * S, 332 * S],
+                             radius=3 * S, outline=col, width=max(1, int(1.6 * S)))
+        d3.line([(cx2 - 7 * S, 326 * S), (cx2 + 7 * S, 326 * S)], fill=col,
+                width=max(1, int(1.6 * S)))
+    elif name == "bike":
+        d3.ellipse([cx2 - 11 * S, 322 * S, cx2 - 3 * S, 330 * S], outline=col,
+                   width=max(1, int(1.5 * S)))
+        d3.ellipse([cx2 + 3 * S, 322 * S, cx2 + 11 * S, 330 * S], outline=col,
+                   width=max(1, int(1.5 * S)))
+        d3.line([(cx2 - 7 * S, 326 * S), (cx2 - 1 * S, 319 * S), (cx2 + 7 * S, 326 * S)],
+                fill=col, width=max(1, int(1.5 * S)))
+    else:
+        d3.ellipse([cx2 - 2 * S, 317 * S, cx2 + 2 * S, 321 * S], fill=col)
+        d3.line([(cx2, 321 * S), (cx2, 327 * S)], fill=col, width=max(1, int(1.6 * S)))
+        d3.line([(cx2, 327 * S), (cx2 - 4 * S, 333 * S)], fill=col, width=max(1, int(1.6 * S)))
+        d3.line([(cx2, 327 * S), (cx2 + 4 * S, 333 * S)], fill=col, width=max(1, int(1.6 * S)))
+
+info = "4,8 km · 11 min · 26 km/h"
+fi = f(SANS, 10.5)
+d3.text((mx - d3.textlength(info, font=fi) / 2, 346 * S), info, font=fi, fill=(30, 28, 26))
+
+d3.rounded_rectangle([mx - 88 * S, 364 * S, mx + 88 * S, 368 * S], radius=2 * S,
+                     fill=(0, 0, 0, 40))
+d3.rounded_rectangle([mx - 88 * S, 364 * S, mx - 88 * S + 104 * S, 368 * S],
+                     radius=2 * S, fill=TINT)
+
+d3.rounded_rectangle([mx - 70 * S, 378 * S, mx + 30 * S, 404 * S], radius=13 * S, fill=TINT)
+t = "Trajet en cours"
+d3.text((mx - 70 * S + (100 * S - d3.textlength(t, font=f(SANS, 10))) / 2, 385 * S), t,
+        font=f(SANS, 10), fill=(255, 255, 255))
+d3.rounded_rectangle([mx + 38 * S, 378 * S, mx + 70 * S, 404 * S], radius=13 * S,
+                     fill=(255, 255, 255, 150), outline=(255, 255, 255, 215), width=max(1, S))
+d3.rectangle([mx + 50 * S, 387 * S, mx + 58 * S, 395 * S], fill=(40, 38, 36))
+
+glass(img3, (196, 414, 452, 444), 15, tint=TINT)
+d3.text((216 * S, 421 * S), "49.18612, -0.36104", font=f(MONO, 10), fill=(28, 26, 24))
+d3.text((372 * S, 422 * S), "26 km/h", font=f(SANS, 9), fill=(70, 66, 62))
+
+out3 = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+out3.paste(img3, (0, 0), corner)
+out3.save("/mnt/user-data/outputs/mirage-v0.3-route.png")
 print("ok")
