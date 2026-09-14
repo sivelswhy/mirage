@@ -40,6 +40,9 @@ struct ContentView: View {
                 }
             }
             .ignoresSafeArea()
+            .overlay(alignment: .top) {
+                UpdateBanner(namespace: glass).padding(.top, 14)
+            }
             .overlay(alignment: .topLeading) {
                 SearchPanel(namespace: glass).padding(20)
             }

@@ -9,7 +9,16 @@ Simulateur de localisation iOS pour macOS 26, interface Liquid Glass.
   (Réglages > Confidentialité et sécurité > Mode développeur, puis redémarrage)
 - Homebrew
 
-## Installation
+## Installation depuis une release
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sivelswhy/mirage/main/scripts/install.sh | bash
+```
+
+L'app vérifie ensuite les mises à jour à chaque lancement et propose un bandeau
+non bloquant. Menu Mirage > Rechercher des mises à jour pour forcer le contrôle.
+
+## Installation depuis les sources
 
 ```bash
 ./scripts/bootstrap.sh
@@ -46,3 +55,16 @@ echo "$USER ALL=(root) NOPASSWD: /chemin/vers/pymobiledevice3" | sudo tee /etc/s
 - La position réelle revient dès que le tunnel meurt
 - Seul le GPS est simulé, pas le Wi-Fi scanning ni le baromètre
 - Incompatible Mac App Store : sandbox et démon root inconciliables
+
+## Intégration continue
+
+Chaque commit sur `main` compile sur `macos-26` et publie un DMG en artefact,
+conservé trente jours. Un tag `v*` déclenche en plus une release GitHub.
+
+```bash
+git tag v0.4.0 && git push origin v0.4.0
+```
+
+Les builds sont signés ad hoc, pas notarisés. Gatekeeper les bloque donc au
+premier lancement, ce que `install.sh` contourne en retirant l'attribut de
+quarantaine.
