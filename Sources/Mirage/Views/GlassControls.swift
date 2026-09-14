@@ -105,7 +105,9 @@ struct StatusPill: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: session.simulated == nil ? "location.slash" : "location.fill")
-                .foregroundStyle(session.simulated == nil ? .secondary : .tint)
+                .foregroundStyle(session.simulated == nil
+                                 ? AnyShapeStyle(.secondary)
+                                 : AnyShapeStyle(.tint))
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.simulated?.formatted ?? "aucune position simulée")
