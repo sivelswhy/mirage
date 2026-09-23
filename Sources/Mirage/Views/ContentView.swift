@@ -56,6 +56,8 @@ struct ContentView: View {
             .overlay {
                 if session.devices.isEmpty {
                     DeviceGate(namespace: glass)
+                } else if session.developerMode == false {
+                    DeveloperModeGate(namespace: glass)
                 } else if needsHelper {
                     ZStack {
                         Rectangle().fill(.black.opacity(0.18)).ignoresSafeArea()
@@ -77,6 +79,7 @@ struct ContentView: View {
                 .opacity(session.devices.isEmpty ? 0 : 1)
             }
             .animation(.smooth(duration: 0.35), value: session.devices.isEmpty)
+            .animation(.smooth(duration: 0.35), value: session.developerMode)
         }
         .task { session.helper.refresh() }
         .fileImporter(

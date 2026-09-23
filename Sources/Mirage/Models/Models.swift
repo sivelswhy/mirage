@@ -6,9 +6,14 @@ struct Device: Identifiable, Hashable, Sendable {
     let name: String
     let productVersion: String
 
-    var needsTunnel: Bool {
-        (Int(productVersion.split(separator: ".").first ?? "0") ?? 0) >= 17
+    private var majorVersion: Int {
+        Int(productVersion.split(separator: ".").first ?? "0") ?? 0
     }
+
+    var needsTunnel: Bool { majorVersion >= 17 }
+
+    /// Le Mode développeur n'existe, et n'est exigé, qu'à partir d'iOS 16.
+    var requiresDeveloperMode: Bool { majorVersion >= 16 }
 }
 
 struct RSDEndpoint: Hashable, Sendable {

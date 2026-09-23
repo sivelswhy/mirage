@@ -20,8 +20,13 @@ final class SpoofSession {
     var isPlanning = false
     var progress: Double = 0
     var lastError: String?
+    /// État du Mode développeur de l'appareil sélectionné ; nil tant qu'il
+    /// n'a pas pu être lu. Sans lui, iOS refuse le service de simulation.
+    var developerMode: Bool?
 
     private var tunnelProcess: Process?
+    /// Appareils pour lesquels le réglage a déjà été révélé dans Réglages.
+    private var revealedDeveloperMode: Set<String> = []
     private var monitor: Task<Void, Never>?
     /// Passerelle vers le démon privilégié. Sans lui, pas d'iOS 17 et plus.
     let helper = HelperClient()
@@ -56,11 +61,21 @@ final class SpoofSession {
                 stopTunnel()
                 simulated = nil
                 selected = nil
+                developerMode = nil
             }
             if selected == nil || !found.contains(where: { $0.id == selected?.id }) {
                 selected = found.first
+                developerMode = nil
             }
-            if appeared, let device = selected, device.needsTunnel {
+
+            // Relu à chaque passage tant qu'il n'est pas actif : l'iPhone
+            // redémarre après l'activation, puis réapparaît sur le bus.
+            let wasEnabled = developerMode == true
+            if developerMode != true { await refreshDeveloperMode() }
+            let justEnabled = !wasEnabled && developerMode == true
+
+            if appeared || justEnabled, let device = selected, device.needsTunnel,
+               developerMode != false {
                 Task { await startTunnel() }
             }
         } catch {
@@ -83,6 +98,39 @@ final class SpoofSession {
                 name: entry["DeviceName"] as? String ?? "iPhone",
                 productVersion: entry["ProductVersion"] as? String ?? "0"
             )
+        }
+    }
+
+    // MARK: Mode développeur
+
+    private func refreshDeveloperMode() async {
+        guard let device = selected else {
+            developerMode = nil
+            return
+        }
+        guard device.requiresDeveloperMode else {
+            developerMode = true
+            return
+        }
+
+        let output = try? await PMD3.run(["amfi", "developer-mode-status", "--udid", device.id])
+        let answer = output?
+            .split(separator: "\n")
+            .last?
+            .trimmingCharacters(in: .whitespaces)
+
+        switch answer {
+        case "true":
+            developerMode = true
+        case "false":
+            developerMode = false
+            // Le réglage reste caché dans iOS tant qu'aucun outil de
+            // développement ne l'a demandé : on le fait apparaître une fois.
+            if revealedDeveloperMode.insert(device.id).inserted {
+                _ = try? await PMD3.run(["amfi", "reveal-developer-mode", "--udid", device.id])
+            }
+        default:
+            developerMode = nil
         }
     }
 
