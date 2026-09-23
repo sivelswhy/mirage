@@ -15,10 +15,13 @@ final class SpoofSession {
     var isImporting = false
     var mode: TravelMode = .driving
     var route: SimulatedRoute?
-    var routeOrigin: CLLocationCoordinate2D?
     var routeDestination: CLLocationCoordinate2D?
     var isPlanning = false
     var progress: Double = 0
+    var isPaused = false
+    /// La carte suit la position pendant un trajet.
+    var followsRoute = true
+    var routeError: String?
     var lastError: String?
     /// Dernier échec d'envoi de position, distinct de `lastError` que la
     /// détection des appareils efface toutes les deux secondes.
@@ -36,6 +39,8 @@ final class SpoofSession {
     /// Passerelle vers le démon privilégié. Sans lui, pas d'iOS 17 et plus.
     let helper = HelperClient()
     private var motion: Task<Void, Never>?
+    private var playback: [CLLocationCoordinate2D] = []
+    private var playbackIndex = 0
     private var lastSent: Date = .distantPast
 
     // MARK: Appareils
@@ -253,6 +258,8 @@ final class SpoofSession {
     /// Avance en continu selon un cap et une vitesse, une trame par seconde.
     func drive(bearing: Double) {
         motion?.cancel()
+        // Le joystick prend la main : un trajet en cours passe en pause.
+        if playbackIndex < playback.count { isPaused = true }
         motion = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, let origin = self.simulated else { return }
@@ -274,9 +281,14 @@ final class SpoofSession {
 
     // MARK: Itinéraires
 
-    /// Calcule le trajet puis, si tout va bien, le joue immédiatement.
+    /// Calcule le trajet depuis la position simulée, puis le joue immédiatement.
     func planRoute() async {
-        guard let from = routeOrigin ?? simulated, let to = routeDestination else { return }
+        routeError = nil
+        guard let to = routeDestination else { return }
+        guard let from = simulated else {
+            routeError = "Place d'abord le départ : clique sur la carte ou cherche un lieu."
+            return
+        }
         isPlanning = true
         defer { isPlanning = false }
 
@@ -285,33 +297,64 @@ final class SpoofSession {
             route = computed
             play(route: computed.frames)
         } catch {
-            lastError = error.localizedDescription
+            routeError = error.localizedDescription
         }
     }
 
     func setDestination(_ coordinate: CLLocationCoordinate2D) {
-        routeOrigin = simulated ?? routeOrigin
         routeDestination = coordinate
+        routeError = nil
     }
 
     func cancelRoute() {
         stopDriving()
         route = nil
         routeDestination = nil
+        playback = []
+        playbackIndex = 0
+        isPaused = false
         progress = 0
+        routeError = nil
     }
 
+    /// Joue les trames depuis le début (trajet calculé ou GPX importé).
     func play(route frames: [CLLocationCoordinate2D]) {
+        playback = frames
+        playbackIndex = 0
+        resume()
+    }
+
+    func pause() {
+        stopDriving()
+        isPaused = true
+    }
+
+    /// Reprend là où le trajet s'était arrêté, une trame par seconde.
+    func resume() {
         motion?.cancel()
-        progress = 0
+        isPaused = false
+        guard playbackIndex < playback.count else { return }
+
         motion = Task { [weak self] in
-            for (index, point) in frames.enumerated() {
-                guard let self, !Task.isCancelled else { return }
-                await self.setLocation(point, throttled: false)
-                self.progress = Double(index + 1) / Double(frames.count)
-                try? await Task.sleep(for: .seconds(1))
+            // Cadence calée sur l'horloge : le temps d'envoi de chaque position
+            // ne s'accumule pas au fil du trajet.
+            let clock = ContinuousClock()
+            let start = clock.now
+            var tick = 0
+            while let self, !Task.isCancelled, self.playbackIndex < self.playback.count {
+                await self.setLocation(self.playback[self.playbackIndex], throttled: false)
+                guard !Task.isCancelled else { return }
+                self.playbackIndex += 1
+                self.progress = Double(self.playbackIndex) / Double(self.playback.count)
+                tick += 1
+                try? await Task.sleep(until: start + .seconds(tick), clock: clock)
             }
         }
     }
+
+    var isPlaying: Bool { motion != nil && !isPaused && playbackIndex < playback.count }
+
+    /// Temps restant, une trame valant une seconde.
+    var remainingTime: TimeInterval { TimeInterval(max(0, playback.count - playbackIndex)) }
 
 }

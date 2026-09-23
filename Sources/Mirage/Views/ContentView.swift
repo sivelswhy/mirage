@@ -83,7 +83,21 @@ struct ContentView: View {
                 .opacity(session.devices.isEmpty ? 0 : 1)
             }
             .animation(.smooth(duration: 0.35), value: session.devices.isEmpty)
+            .overlay(alignment: .bottomTrailing) {
+                VersionBadge().padding(20)
+            }
             .animation(.smooth(duration: 0.35), value: session.developerMode)
+            // Pendant un trajet, la carte accompagne la position simulée en
+            // gardant le zoom choisi.
+            .onChange(of: session.progress) {
+                guard session.followsRoute, session.isPlaying,
+                      let point = session.simulated else { return }
+                let span = visibleRegion?.span
+                    ?? MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
+                withAnimation(.linear(duration: 0.9)) {
+                    camera = .region(MKCoordinateRegion(center: point, span: span))
+                }
+            }
         }
         .task { session.helper.refresh() }
         .fileImporter(
@@ -132,5 +146,22 @@ struct DestinationPin: View {
             .font(.system(size: 26))
             .foregroundStyle(.white, .red)
             .shadow(radius: 2)
+    }
+}
+
+/// Version installée, discrète dans le coin inférieur droit.
+struct VersionBadge: View {
+    private var version: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    }
+
+    var body: some View {
+        Text("Mirage \(version)")
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .glassEffect(.regular, in: .capsule)
+            .textSelection(.enabled)
     }
 }

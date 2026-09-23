@@ -25,7 +25,10 @@ struct SearchPanel: View {
                 TextField("Rechercher un lieu", text: $query)
                     .textFieldStyle(.plain)
                     .focused($focused)
-                    .onSubmit { choose(highlightedSuggestion) }
+                    .onSubmit {
+                        choose(highlightedSuggestion,
+                               asDestination: NSEvent.modifierFlags.contains(.option))
+                    }
                     .onKeyPress(.downArrow) { move(1) }
                     .onKeyPress(.upArrow) { move(-1) }
                     .onKeyPress(.escape) {
@@ -62,26 +65,35 @@ struct SearchPanel: View {
             if !query.isEmpty, !search.suggestions.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(search.suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                        Button { choose(suggestion) } label: {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(suggestion.title)
-                                    .lineLimit(1)
-                                if !suggestion.subtitle.isEmpty {
-                                    Text(suggestion.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Button { choose(suggestion) } label: {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(suggestion.title)
                                         .lineLimit(1)
+                                    if !suggestion.subtitle.isEmpty {
+                                        Text(suggestion.subtitle)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                                .background(index == highlighted ? AnyShapeStyle(.tint.opacity(0.18))
+                                                                 : AnyShapeStyle(.clear),
+                                            in: .rect(cornerRadius: 8))
+                                .contentShape(.rect)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                            .background(index == highlighted ? AnyShapeStyle(.tint.opacity(0.18))
-                                                             : AnyShapeStyle(.clear),
-                                        in: .rect(cornerRadius: 8))
-                            .contentShape(.rect)
+                            .buttonStyle(.plain)
+
+                            Button { choose(suggestion, asDestination: true) } label: {
+                                Image(systemName: "arrow.triangle.turn.up.right.circle")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Définir comme arrivée (⌥ Entrée)")
                         }
-                        .buttonStyle(.plain)
                         .onHover { if $0 { highlighted = index } }
                     }
                 }
@@ -133,7 +145,7 @@ struct SearchPanel: View {
     }
 
     /// Sans suggestion, le texte saisi est cherché tel quel.
-    private func choose(_ suggestion: PlaceSearch.Suggestion?) {
+    private func choose(_ suggestion: PlaceSearch.Suggestion?, asDestination: Bool = false) {
         let text = query.trimmingCharacters(in: .whitespaces)
         guard suggestion != nil || !text.isEmpty else { return }
 
@@ -142,7 +154,11 @@ struct SearchPanel: View {
                 let place = try await search.resolve(suggestion, query: text, near: visibleRegion)
                 clear()
                 focused = false
-                go(to: place)
+                if asDestination {
+                    setDestination(place)
+                } else {
+                    go(to: place)
+                }
             } catch {
                 search.failure = error.localizedDescription
             }
@@ -151,18 +167,31 @@ struct SearchPanel: View {
 
     /// Centre la carte sur le lieu, puis y déplace l'iPhone.
     private func go(to place: PlaceSearch.Place) {
+        focus(on: place.coordinate)
+        remember(place)
+        Task { await session.setLocation(place.coordinate, throttled: false) }
+    }
+
+    /// Pose l'arrivée sans déplacer l'iPhone, prête pour « Lancer le trajet ».
+    private func setDestination(_ place: PlaceSearch.Place) {
+        focus(on: place.coordinate)
+        remember(place)
+        session.setDestination(place.coordinate)
+    }
+
+    private func focus(on coordinate: CLLocationCoordinate2D) {
         withAnimation(.smooth(duration: 0.6)) {
             camera = .region(MKCoordinateRegion(
-                center: place.coordinate,
+                center: coordinate,
                 span: .init(latitudeDelta: 0.02, longitudeDelta: 0.02)
             ))
         }
+    }
 
+    private func remember(_ place: PlaceSearch.Place) {
         session.recents.removeAll { $0.name == place.name }
         session.recents.insert(Waypoint(coordinate: place.coordinate, name: place.name), at: 0)
         session.recents = Array(session.recents.prefix(5))
-
-        Task { await session.setLocation(place.coordinate, throttled: false) }
     }
 }
 

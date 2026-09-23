@@ -25,11 +25,15 @@ enum TravelMode: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// MapKit ne trace ni le vélo ni les transports : on emprunte la géométrie routière.
-    var mapKitType: MKDirectionsTransportType {
+    /// Types MapKit essayés dans l'ordre. Les itinéraires vélo n'existent pas
+    /// partout, et MapKit ne trace jamais les transports : on se replie alors
+    /// sur la géométrie la plus proche.
+    var mapKitTypes: [MKDirectionsTransportType] {
         switch self {
-        case .driving, .transit, .cycling: .automobile
-        case .walking: .walking
+        case .driving: [.automobile]
+        case .transit: [.automobile]
+        case .cycling: [.cycling, .walking]
+        case .walking: [.walking]
         }
     }
 
@@ -79,13 +83,12 @@ enum RoutePlanner {
         mode: TravelMode
     ) async throws -> SimulatedRoute {
 
-        let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: .init(coordinate: origin))
-        request.destination = MKMapItem(placemark: .init(coordinate: destination))
-        request.transportType = mode.mapKitType
-
-        guard let route = try await MKDirections(request: request).calculate().routes.first
-        else { throw RouteError.noRoute }
+        var found: MKRoute?
+        for type in mode.mapKitTypes where found == nil {
+            let request = directionsRequest(from: origin, to: destination, type: type)
+            found = try? await MKDirections(request: request).calculate().routes.first
+        }
+        guard let route = found else { throw RouteError.noRoute }
 
         let coordinates = route.polyline.coordinates
         let duration = try await resolvedDuration(route: route, mode: mode,
@@ -114,18 +117,34 @@ enum RoutePlanner {
             return route.expectedTravelTime
 
         case .transit:
-            let request = MKDirections.Request()
-            request.source = MKMapItem(placemark: .init(coordinate: origin))
-            request.destination = MKMapItem(placemark: .init(coordinate: destination))
-            request.transportType = .transit
+            let request = directionsRequest(from: origin, to: destination, type: .transit)
             if let eta = try? await MKDirections(request: request).calculateETA() {
                 return eta.expectedTravelTime
             }
             return route.distance / mode.fallbackSpeed
 
         case .cycling:
-            return route.distance / mode.fallbackSpeed
+            // Durée MapKit si le tracé est bien cyclable, sinon vitesse moyenne.
+            return route.transportType == .cycling
+                ? route.expectedTravelTime
+                : route.distance / mode.fallbackSpeed
         }
+    }
+
+    private static func directionsRequest(
+        from origin: CLLocationCoordinate2D,
+        to destination: CLLocationCoordinate2D,
+        type: MKDirectionsTransportType
+    ) -> MKDirections.Request {
+        let request = MKDirections.Request()
+        request.source = MKMapItem(location: CLLocation(latitude: origin.latitude,
+                                                        longitude: origin.longitude),
+                                   address: nil)
+        request.destination = MKMapItem(location: CLLocation(latitude: destination.latitude,
+                                                             longitude: destination.longitude),
+                                        address: nil)
+        request.transportType = type
+        return request
     }
 
     /// Rééchantillonne le tracé à une trame par seconde avec un profil de vitesse réaliste :
@@ -148,22 +167,25 @@ enum RoutePlanner {
         let total = cumulative.last ?? 0
         guard total > 0 else { return path }
 
-        let steps = max(2, Int(duration.rounded()))
-        let nominal = total / duration
+        let nominal = total / max(duration, 1)
 
+        // Les virages et les arrêts ralentissent : sur un nombre fixe de
+        // trames, on n'atteignait jamais l'arrivée et la dernière trame
+        // téléportait l'appareil. On avance donc jusqu'au bout du tracé,
+        // avec une limite de sécurité.
         var output: [CLLocationCoordinate2D] = []
         var travelled: CLLocationDistance = 0
         var generator = SystemRandomNumberGenerator()
+        let limit = max(4, Int(duration.rounded()) * 3)
 
-        for _ in 0..<steps {
+        while travelled < total, output.count < limit {
             output.append(interpolate(path: path, cumulative: cumulative, at: travelled))
 
             let curvature = curvatureFactor(path: path, cumulative: cumulative, at: travelled)
             let noise = Double.random(in: 0.92...1.08, using: &generator)
             let stopped = Double.random(in: 0...1, using: &generator) < mode.stopProbability * 0.04
 
-            travelled += stopped ? 0 : nominal * curvature * noise
-            travelled = min(travelled, total)
+            travelled = min(total, travelled + (stopped ? 0 : nominal * curvature * noise))
         }
 
         output.append(path[path.count - 1])
