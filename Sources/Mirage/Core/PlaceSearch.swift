@@ -85,24 +85,21 @@ final class PlaceSearch: NSObject {
     }
 }
 
-extension PlaceSearch: MKLocalSearchCompleterDelegate {
+/// MapKit appelle le délégué sur le fil principal, où le complèteur a été
+/// créé : la conformité est donc isolée à l'acteur principal.
+extension PlaceSearch: @preconcurrency MKLocalSearchCompleterDelegate {
 
-    nonisolated func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
-        MainActor.assumeIsolated {
-            suggestions = completer.results.prefix(6).map {
-                Suggestion(title: $0.title, subtitle: $0.subtitle, completion: $0)
-            }
+    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        suggestions = completer.results.prefix(6).map {
+            Suggestion(title: $0.title, subtitle: $0.subtitle, completion: $0)
         }
     }
 
-    nonisolated func completer(_ completer: MKLocalSearchCompleter,
-                               didFailWithError error: Error) {
-        MainActor.assumeIsolated {
-            suggestions = []
-            // Une frappe rapide annule la requête précédente : ce n'est pas un échec.
-            if (error as NSError).code != MKError.Code.unknown.rawValue {
-                failure = error.localizedDescription
-            }
+    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
+        suggestions = []
+        // Une frappe rapide annule la requête précédente : ce n'est pas un échec.
+        if (error as NSError).code != MKError.Code.unknown.rawValue {
+            failure = error.localizedDescription
         }
     }
 }
