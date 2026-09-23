@@ -44,6 +44,10 @@ targets:
       properties:
         CFBundleName: Mirage
         CFBundleDisplayName: Mirage
+        # Sans ces clés, XcodeGen écrit « 1.0 » en dur et ignore la version
+        # passée au build : l'app et le système de mise à jour s'y trompaient.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: "26.0"
         NSLocationUsageDescription: Mirage affiche la carte autour de votre position.
         NSHumanReadableCopyright: ""
