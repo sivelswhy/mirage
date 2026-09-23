@@ -20,11 +20,16 @@ final class SpoofSession {
     var isPlanning = false
     var progress: Double = 0
     var lastError: String?
+    /// Dernier échec d'envoi de position, distinct de `lastError` que la
+    /// détection des appareils efface toutes les deux secondes.
+    var locationError: String?
     /// État du Mode développeur de l'appareil sélectionné ; nil tant qu'il
     /// n'a pas pu être lu. Sans lui, iOS refuse le service de simulation.
     var developerMode: Bool?
 
     private var tunnelProcess: Process?
+    private var channel: LocationChannel?
+    private var opening: Task<LocationChannel, Error>?
     /// Appareils pour lesquels le réglage a déjà été révélé dans Réglages.
     private var revealedDeveloperMode: Set<String> = []
     private var monitor: Task<Void, Never>?
@@ -175,6 +180,7 @@ final class SpoofSession {
     }
 
     func stopTunnel() {
+        closeChannel()
         tunnelProcess?.terminate()
         tunnelProcess = nil
         tunnel = .idle
@@ -183,30 +189,63 @@ final class SpoofSession {
 
     // MARK: Localisation
 
-    private var rsdArgs: [String] {
-        guard let e = tunnel.endpoint, !e.address.isEmpty else { return [] }
-        return ["--rsd", e.address, String(e.port)]
+    /// Cible du canal de simulation : le tunnel pour iOS 17 et plus, usbmux avant.
+    private var channelTarget: LocationChannel.Target? {
+        guard let device = selected else { return nil }
+        if let endpoint = tunnel.endpoint, !endpoint.address.isEmpty {
+            return .rsd(endpoint)
+        }
+        return device.needsTunnel ? nil : .usbmux(udid: device.id)
     }
 
+    /// Canal ouvert à la demande et rouvert si le tunnel a changé ou s'il est tombé.
+    private func locationChannel() async throws -> LocationChannel {
+        if let opening { return try await opening.value }
+        guard let target = channelTarget else {
+            throw PMD3Error.failed(code: 0, stderr: "Tunnel non ouvert : \(tunnel.label)")
+        }
+        if let channel, channel.target == target, channel.isAlive { return channel }
+
+        closeChannel()
+        let task = Task {
+            let new = LocationChannel(target: target)
+            try await new.open()
+            return new
+        }
+        opening = task
+        defer { opening = nil }
+
+        let new = try await task.value
+        channel = new
+        return new
+    }
+
+    private func closeChannel() {
+        channel?.close()
+        channel = nil
+    }
+
+    /// La position n'est affichée comme simulée qu'une fois confirmée par l'appareil.
     func setLocation(_ coordinate: CLLocationCoordinate2D, throttled: Bool = true) async {
         if throttled, Date().timeIntervalSince(lastSent) < 0.9 { return }
         lastSent = .now
-        simulated = coordinate
 
         do {
-            try await PMD3.run(
-                ["developer", "dvt", "simulate-location", "set"] + rsdArgs
-                + ["--", String(coordinate.latitude), String(coordinate.longitude)]
-            )
+            try await locationChannel().set(latitude: coordinate.latitude,
+                                             longitude: coordinate.longitude)
+            simulated = coordinate
+            locationError = nil
         } catch {
-            lastError = error.localizedDescription
+            closeChannel()
+            locationError = error.localizedDescription
         }
     }
 
     func clearLocation() async {
         motion?.cancel()
         simulated = nil
-        _ = try? await PMD3.run(["developer", "dvt", "simulate-location", "clear"] + rsdArgs)
+        try? await channel?.clear()
+        closeChannel()
     }
 
     // MARK: Déplacement continu

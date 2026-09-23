@@ -11,6 +11,9 @@ struct ContentView: View {
             span: .init(latitudeDelta: 0.05, longitudeDelta: 0.05)
         )
     )
+    /// Zone visible, suivie en continu : `camera.region` redevient nil dès
+    /// que l'utilisateur fait glisser la carte.
+    @State private var visibleRegion: MKCoordinateRegion?
 
     var body: some View {
         @Bindable var session = session
@@ -31,6 +34,7 @@ struct ContentView: View {
             }
             .mapStyle(.standard(elevation: .realistic))
             .mapControlVisibility(.hidden)
+            .onMapCameraChange(frequency: .onEnd) { visibleRegion = $0.region }
             .onTapGesture { location in
                 guard let coordinate = proxy.convert(location, from: .local) else { return }
                 if NSEvent.modifierFlags.contains(.option) {
@@ -48,7 +52,7 @@ struct ContentView: View {
                 .padding(.top, 14)
             }
             .overlay(alignment: .topLeading) {
-                SearchPanel(namespace: glass).padding(20)
+                SearchPanel(camera: $camera, visibleRegion: visibleRegion, namespace: glass).padding(20)
             }
             .overlay(alignment: .topTrailing) {
                 ControlCluster(camera: $camera, namespace: glass).padding(20)

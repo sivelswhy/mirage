@@ -36,7 +36,7 @@ enum TunnelState: Equatable, Sendable {
         switch self {
         case .idle: "tunnel inactif"
         case .starting: "ouverture du tunnel…"
-        case .up: "simulation active"
+        case .up: "iPhone connecté"
         case .failed(let m): m
         }
     }

@@ -3,8 +3,14 @@ import MapKit
 
 struct SearchPanel: View {
     @Environment(SpoofSession.self) private var session
+    @Binding var camera: MapCameraPosition
+    let visibleRegion: MKCoordinateRegion?
     let namespace: Namespace.ID
+
     @State private var query = ""
+    @State private var search = PlaceSearch()
+    @State private var highlighted = 0
+    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -18,14 +24,68 @@ struct SearchPanel: View {
 
                 TextField("Rechercher un lieu", text: $query)
                     .textFieldStyle(.plain)
-                    .onSubmit { Task { await geocode() } }
+                    .focused($focused)
+                    .onSubmit { choose(highlightedSuggestion) }
+                    .onKeyPress(.downArrow) { move(1) }
+                    .onKeyPress(.upArrow) { move(-1) }
+                    .onKeyPress(.escape) {
+                        clear()
+                        return .handled
+                    }
+
+                if search.isResolving {
+                    ProgressView().controlSize(.mini)
+                } else if !query.isEmpty {
+                    Button(action: clear) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.6), in: .capsule)
+            .onChange(of: query) {
+                highlighted = 0
+                search.update(query: query, near: visibleRegion)
+            }
 
-            if !session.recents.isEmpty {
+            if let failure = search.failure {
+                Text(failure)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 6)
+            }
+
+            if !query.isEmpty, !search.suggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(search.suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                        Button { choose(suggestion) } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(suggestion.title)
+                                    .lineLimit(1)
+                                if !suggestion.subtitle.isEmpty {
+                                    Text(suggestion.subtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(index == highlighted ? AnyShapeStyle(.tint.opacity(0.18))
+                                                             : AnyShapeStyle(.clear),
+                                        in: .rect(cornerRadius: 8))
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { if $0 { highlighted = index } }
+                    }
+                }
+            } else if query.isEmpty, !session.recents.isEmpty {
                 Text("Récents")
                     .font(.caption2)
                     .fontWeight(.semibold)
@@ -36,8 +96,8 @@ struct SearchPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(session.recents) { waypoint in
                         Button {
-                            Task { await session.setLocation(waypoint.coordinate,
-                                                             throttled: false) }
+                            go(to: PlaceSearch.Place(name: waypoint.name,
+                                                     coordinate: waypoint.coordinate))
                         } label: {
                             Text(waypoint.name)
                                 .lineLimit(1)
@@ -57,18 +117,52 @@ struct SearchPanel: View {
         .glassEffectID("panel", in: namespace)
     }
 
-    private func geocode() async {
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = query
-        guard let item = try? await MKLocalSearch(request: request).start().mapItems.first
-        else { return }
+    private var highlightedSuggestion: PlaceSearch.Suggestion? {
+        search.suggestions.indices.contains(highlighted) ? search.suggestions[highlighted] : nil
+    }
 
-        await session.setLocation(item.placemark.coordinate, throttled: false)
-        session.recents.insert(
-            Waypoint(coordinate: item.placemark.coordinate, name: item.name ?? query),
-            at: 0
-        )
+    private func move(_ step: Int) -> KeyPress.Result {
+        guard !search.suggestions.isEmpty else { return .ignored }
+        highlighted = (highlighted + step + search.suggestions.count) % search.suggestions.count
+        return .handled
+    }
+
+    private func clear() {
+        query = ""
+        search.reset()
+    }
+
+    /// Sans suggestion, le texte saisi est cherché tel quel.
+    private func choose(_ suggestion: PlaceSearch.Suggestion?) {
+        let text = query.trimmingCharacters(in: .whitespaces)
+        guard suggestion != nil || !text.isEmpty else { return }
+
+        Task {
+            do {
+                let place = try await search.resolve(suggestion, query: text, near: visibleRegion)
+                clear()
+                focused = false
+                go(to: place)
+            } catch {
+                search.failure = error.localizedDescription
+            }
+        }
+    }
+
+    /// Centre la carte sur le lieu, puis y déplace l'iPhone.
+    private func go(to place: PlaceSearch.Place) {
+        withAnimation(.smooth(duration: 0.6)) {
+            camera = .region(MKCoordinateRegion(
+                center: place.coordinate,
+                span: .init(latitudeDelta: 0.02, longitudeDelta: 0.02)
+            ))
+        }
+
+        session.recents.removeAll { $0.name == place.name }
+        session.recents.insert(Waypoint(coordinate: place.coordinate, name: place.name), at: 0)
         session.recents = Array(session.recents.prefix(5))
+
+        Task { await session.setLocation(place.coordinate, throttled: false) }
     }
 }
 
@@ -124,9 +218,17 @@ struct StatusPill: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.simulated?.formatted ?? "aucune position simulée")
                     .font(.system(.body, design: .monospaced))
-                Text("\(session.selected?.name ?? "aucun appareil") · \(session.tunnel.label)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let error = session.locationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                        .frame(maxWidth: 320, alignment: .leading)
+                } else {
+                    Text("\(session.selected?.name ?? "aucun appareil") · \(session.tunnel.label)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if session.simulated != nil {

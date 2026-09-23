@@ -20,7 +20,7 @@ enum PMD3 {
     /// Interpréteur relocalisable embarqué dans le bundle.
     /// On appelle `python3 -m pymobiledevice3` plutôt que le script console,
     /// car ce dernier encode un shebang absolu qui ne survit pas au transport.
-    private static var embeddedPython: URL? {
+    static var python: URL? {
         guard let resources = Bundle.main.resourceURL else { return nil }
         let candidate = resources.appendingPathComponent("backend/bin/python3")
         return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
@@ -38,7 +38,7 @@ enum PMD3 {
     /// fichier ajouté brise le scellement de la signature, et macOS refuse
     /// alors le démon (« Démon absent du bundle »).
     static func invocation(_ arguments: [String]) -> (executable: URL, arguments: [String])? {
-        if let python = embeddedPython {
+        if let python {
             return (python, ["-B", "-m", "pymobiledevice3"] + arguments)
         }
         if let binary = systemBinary {
