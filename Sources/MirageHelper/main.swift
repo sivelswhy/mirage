@@ -4,25 +4,35 @@ import Foundation
 
 /// Le démon vit dans Contents/MacOS du bundle de l'app : l'interpréteur
 /// embarqué se trouve donc deux niveaux au-dessus, dans Resources.
-private var searchedPaths: [String] = []
-
-private func embeddedPython() -> URL? {
-    searchedPaths = []
+///
+/// launchd passe un argv[0] relatif au bundle (« Contents/MacOS/… ») avec
+/// « / » pour répertoire courant : seul Bundle.main donne un chemin absolu.
+/// En cas d'échec, les chemins essayés sont renvoyés pour le diagnostic.
+private func embeddedPython() -> Result<URL, EmbeddedPythonMissing> {
+    var searched: [String] = []
     let executable = (Bundle.main.executableURL
                       ?? URL(fileURLWithPath: CommandLine.arguments[0]))
         .resolvingSymlinksInPath()
     var directory = executable.deletingLastPathComponent()
     for _ in 0..<4 {
         let candidate = directory.appendingPathComponent("Resources/backend/bin/python3")
-        searchedPaths.append(candidate.path)
+        searched.append(candidate.path)
         if FileManager.default.isExecutableFile(atPath: candidate.path) {
-            return candidate
+            return .success(candidate)
         }
         directory = directory.deletingLastPathComponent()
     }
-    return nil
+    return .failure(EmbeddedPythonMissing(searched: searched))
 }
 
+private struct EmbeddedPythonMissing: Error {
+    let searched: [String]
+
+    var message: String {
+        "Interpréteur embarqué introuvable (cherché dans : "
+            + searched.joined(separator: ", ") + ")"
+    }
+}
 
 // MARK: - Boîtes verrouillées
 
@@ -95,8 +105,12 @@ final class TunnelService: NSObject, TunnelControlProtocol, @unchecked Sendable 
             return
         }
 
-        guard let python = embeddedPython() else {
-            answer.send(nil, 0, "Interpréteur embarqué introuvable")
+        let python: URL
+        switch embeddedPython() {
+        case .success(let url):
+            python = url
+        case .failure(let missing):
+            answer.send(nil, 0, missing.message)
             return
         }
 
