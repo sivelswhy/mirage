@@ -4,14 +4,25 @@ import Foundation
 
 /// Le démon vit dans Contents/MacOS du bundle de l'app : l'interpréteur
 /// embarqué se trouve donc deux niveaux au-dessus, dans Resources.
+private var searchedPaths: [String] = []
+
 private func embeddedPython() -> URL? {
-    let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
-    let contents = executable
-        .deletingLastPathComponent()   // MacOS
-        .deletingLastPathComponent()   // Contents
-    let python = contents.appendingPathComponent("Resources/backend/bin/python3")
-    return FileManager.default.isExecutableFile(atPath: python.path) ? python : nil
+    searchedPaths = []
+    let executable = (Bundle.main.executableURL
+                      ?? URL(fileURLWithPath: CommandLine.arguments[0]))
+        .resolvingSymlinksInPath()
+    var directory = executable.deletingLastPathComponent()
+    for _ in 0..<4 {
+        let candidate = directory.appendingPathComponent("Resources/backend/bin/python3")
+        searchedPaths.append(candidate.path)
+        if FileManager.default.isExecutableFile(atPath: candidate.path) {
+            return candidate
+        }
+        directory = directory.deletingLastPathComponent()
+    }
+    return nil
 }
+
 
 // MARK: - Boîtes verrouillées
 
