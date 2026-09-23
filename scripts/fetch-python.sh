@@ -64,9 +64,16 @@ mv "$STAGE/python" "$TARGET"
 "$TARGET/bin/python3" -m pip install --quiet --upgrade pip
 "$TARGET/bin/python3" -m pip install --quiet pymobiledevice3
 
-# Allège le bundle : caches et en-têtes de compilation inutiles à l'exécution.
-find "$TARGET" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+# Allège le bundle : en-têtes de compilation inutiles à l'exécution.
 rm -rf "$TARGET/include" "$TARGET/share" 2>/dev/null || true
+
+# Précompile tout le bytecode avant la signature. Sans cela, Python écrit ses
+# __pycache__ dans le bundle au premier lancement, ce qui brise le scellement
+# de la signature et fait refuser le démon par macOS. Le mode unchecked-hash
+# ne compare pas les dates des sources, que la copie de l'app modifie.
+find "$TARGET" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+"$TARGET/bin/python3" -m compileall -q -j 0 \
+  --invalidation-mode unchecked-hash "$TARGET/lib" >/dev/null || true
 
 "$TARGET/bin/python3" -m pymobiledevice3 version
 echo "Backend installé dans Resources/backend"
