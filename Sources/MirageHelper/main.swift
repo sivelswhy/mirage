@@ -118,7 +118,8 @@ final class TunnelService: NSObject, TunnelControlProtocol, @unchecked Sendable 
 
         let task = Process()
         task.executableURL = python
-        task.arguments = ["-m", "pymobiledevice3", "lockdown", "start-tunnel", "--udid", udid]
+        // -B : aucun __pycache__ écrit dans le bundle, qui perdrait sa signature.
+        task.arguments = ["-B", "-m", "pymobiledevice3", "lockdown", "start-tunnel", "--udid", udid]
 
         let pipe = Pipe()
         task.standardOutput = pipe

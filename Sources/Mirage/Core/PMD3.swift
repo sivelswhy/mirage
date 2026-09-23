@@ -34,9 +34,12 @@ enum PMD3 {
     }
 
     /// Exécutable et préfixe d'arguments à utiliser pour toute commande.
+    /// `-B` empêche Python d'écrire des __pycache__ dans le bundle : tout
+    /// fichier ajouté brise le scellement de la signature, et macOS refuse
+    /// alors le démon (« Démon absent du bundle »).
     static func invocation(_ arguments: [String]) -> (executable: URL, arguments: [String])? {
         if let python = embeddedPython {
-            return (python, ["-m", "pymobiledevice3"] + arguments)
+            return (python, ["-B", "-m", "pymobiledevice3"] + arguments)
         }
         if let binary = systemBinary {
             return (binary, arguments)
